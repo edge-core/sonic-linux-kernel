@@ -1,0 +1,25 @@
+From 7a93f7baea288c6052e061329d7dececabf469f5 Mon Sep 17 00:00:00 2001
+From: kyle_shih <kyle_shih@edge-core.com>
+Date: Thu, 28 Jul 2022 02:58:10 +0000
+Subject: [PATCH] change BR_PORT_BITS to 16
+
+---
+ net/bridge/br_private.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/bridge/br_private.h b/net/bridge/br_private.h
+index 5e5726048..7c4986a35 100644
+--- a/net/bridge/br_private.h
++++ b/net/bridge/br_private.h
+@@ -24,7 +24,7 @@
+ 
+ #define BR_HOLD_TIME (1*HZ)
+ 
+-#define BR_PORT_BITS	10
++#define BR_PORT_BITS	16
+ #define BR_MAX_PORTS	(1<<BR_PORT_BITS)
+ 
+ #define BR_MULTICAST_DEFAULT_HASH_MAX 4096
+-- 
+2.17.1
+

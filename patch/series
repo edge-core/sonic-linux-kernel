@@ -302,3 +302,4 @@ armhf_secondary_boot_online.patch
 # Do not add any public patch below this marker
 #
 ############################################################
+increase-interface-num-per-bridge-port.patch
