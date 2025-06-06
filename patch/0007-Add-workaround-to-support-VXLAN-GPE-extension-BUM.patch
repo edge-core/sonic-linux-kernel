@@ -1,0 +1,225 @@
+From 55b51ed2cca5d82f7c800b862703e596a8196a8c Mon Sep 17 00:00:00 2001
+From: ecsonic <ecsonic@edge-core.com>
+Date: Wed, 9 Aug 2023 02:01:42 +0000
+Subject: [PATCH] Add workaround to support VXLAN GPE extension BUM bit
+
+* This only simulate the GPE extension BUM bit on the
+  original VXLAN header in Tx direction
+---
+ drivers/net/vxlan.c          | 37 ++++++++++++++++++++++++++----------
+ include/net/vxlan.h          |  2 ++
+ include/uapi/linux/if_link.h |  8 ++++++++
+ 3 files changed, 37 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/net/vxlan.c b/drivers/net/vxlan.c
+index d3b698d9e..0e1aab6bf 100644
+--- a/drivers/net/vxlan.c
++++ b/drivers/net/vxlan.c
+@@ -1851,6 +1851,7 @@ static int vxlan_rcv(struct sock *sk, struct sk_buff *skb)
+ 	}
+ 	unparsed.vx_flags &= ~VXLAN_HF_VNI;
+ 	unparsed.vx_vni &= ~VXLAN_VNI_MASK;
++	unparsed.vx_flags &= ~VXLAN_BUM_BIT;
+
+ 	vs = rcu_dereference_sk_user_data(sk);
+ 	if (!vs)
+@@ -2312,7 +2313,7 @@ static void vxlan_build_gbp_hdr(struct vxlanhdr *vxh, u32 vxflags,
+ }
+
+ static int vxlan_build_gpe_hdr(struct vxlanhdr *vxh, u32 vxflags,
+-			       __be16 protocol)
++			       __be16 protocol, bool bum)
+ {
+ 	struct vxlanhdr_gpe *gpe = (struct vxlanhdr_gpe *)vxh;
+
+@@ -2326,7 +2327,7 @@ static int vxlan_build_gpe_hdr(struct vxlanhdr *vxh, u32 vxflags,
+ static int vxlan_build_skb(struct sk_buff *skb, struct dst_entry *dst,
+ 			   int iphdr_len, __be32 vni,
+ 			   struct vxlan_metadata *md, u32 vxflags,
+-			   bool udp_sum)
++			   bool udp_sum, bool bum)
+ {
+ 	struct vxlanhdr *vxh;
+ 	int min_headroom;
+@@ -2359,6 +2360,9 @@ static int vxlan_build_skb(struct sk_buff *skb, struct dst_entry *dst,
+
+ 	vxh = __skb_push(skb, sizeof(*vxh));
+ 	vxh->vx_flags = VXLAN_HF_VNI;
++	if (bum)
++		vxh->vx_flags |= VXLAN_BUM_BIT;
++
+ 	vxh->vx_vni = vxlan_vni_field(vni);
+
+ 	if (type & SKB_GSO_TUNNEL_REMCSUM) {
+@@ -2377,7 +2381,7 @@ static int vxlan_build_skb(struct sk_buff *skb, struct dst_entry *dst,
+ 	if (vxflags & VXLAN_F_GBP)
+ 		vxlan_build_gbp_hdr(vxh, vxflags, md);
+ 	if (vxflags & VXLAN_F_GPE) {
+-		err = vxlan_build_gpe_hdr(vxh, vxflags, skb->protocol);
++		err = vxlan_build_gpe_hdr(vxh, vxflags, skb->protocol, bum);
+ 		if (err < 0)
+ 			return err;
+ 		inner_protocol = skb->protocol;
+@@ -2587,7 +2591,7 @@ static int encap_bypass_if_local(struct sk_buff *skb, struct net_device *dev,
+
+ static void vxlan_xmit_one(struct sk_buff *skb, struct net_device *dev,
+ 			   __be32 default_vni, struct vxlan_rdst *rdst,
+-			   bool did_rsc)
++			   bool did_rsc, bool bum)
+ {
+ 	struct dst_cache *dst_cache;
+ 	struct ip_tunnel_info *info;
+@@ -2743,8 +2747,12 @@ static void vxlan_xmit_one(struct sk_buff *skb, struct net_device *dev,
+
+ 		tos = ip_tunnel_ecn_encap(tos, old_iph, skb);
+ 		ttl = ttl ? : ip4_dst_hoplimit(&rt->dst);
++		if (vxlan->cfg.gpe_bum == VXLAN_GPE_BUM_UNSET) {
++			bum = false;
++		}
++
+ 		err = vxlan_build_skb(skb, ndst, sizeof(struct iphdr),
+-				      vni, md, flags, udp_sum);
++				      vni, md, flags, udp_sum, bum);
+ 		if (err < 0)
+ 			goto tx_error;
+
+@@ -2807,7 +2815,7 @@ static void vxlan_xmit_one(struct sk_buff *skb, struct net_device *dev,
+ 		ttl = ttl ? : ip6_dst_hoplimit(ndst);
+ 		skb_scrub_packet(skb, xnet);
+ 		err = vxlan_build_skb(skb, ndst, sizeof(struct ipv6hdr),
+-				      vni, md, flags, udp_sum);
++				      vni, md, flags, udp_sum, bum);
+ 		if (err < 0)
+ 			goto tx_error;
+
+@@ -2858,7 +2866,7 @@ static void vxlan_xmit_nh(struct sk_buff *skb, struct net_device *dev,
+ 	rcu_read_unlock();
+
+ 	if (likely(do_xmit))
+-		vxlan_xmit_one(skb, dev, vni, &nh_rdst, did_rsc);
++		vxlan_xmit_one(skb, dev, vni, &nh_rdst, did_rsc, false);
+ 	else
+ 		goto drop;
+
+@@ -2881,6 +2889,7 @@ static netdev_tx_t vxlan_xmit(struct sk_buff *skb, struct net_device *dev)
+ 	struct vxlan_rdst *rdst, *fdst = NULL;
+ 	const struct ip_tunnel_info *info;
+ 	bool did_rsc = false;
++	bool bum = false;
+ 	struct vxlan_fdb *f;
+ 	struct ethhdr *eth;
+ 	__be32 vni = 0;
+@@ -2895,7 +2904,7 @@ static netdev_tx_t vxlan_xmit(struct sk_buff *skb, struct net_device *dev)
+ 			vni = tunnel_id_to_key32(info->key.tun_id);
+ 		} else {
+ 			if (info && info->mode & IP_TUNNEL_INFO_TX)
+-				vxlan_xmit_one(skb, dev, vni, NULL, false);
++				vxlan_xmit_one(skb, dev, vni, NULL, false, false); // TODO: need to check is BUM or not
+ 			else
+ 				kfree_skb(skb);
+ 			return NETDEV_TX_OK;
+@@ -2943,6 +2952,8 @@ static netdev_tx_t vxlan_xmit(struct sk_buff *skb, struct net_device *dev)
+ 			kfree_skb(skb);
+ 			return NETDEV_TX_OK;
+ 		}
++
++		bum = true;
+ 	}
+
+ 	if (rcu_access_pointer(f->nh)) {
+@@ -2958,10 +2969,10 @@ static netdev_tx_t vxlan_xmit(struct sk_buff *skb, struct net_device *dev)
+ 			}
+ 			skb1 = skb_clone(skb, GFP_ATOMIC);
+ 			if (skb1)
+-				vxlan_xmit_one(skb1, dev, vni, rdst, did_rsc);
++				vxlan_xmit_one(skb1, dev, vni, rdst, did_rsc, bum);
+ 		}
+ 		if (fdst)
+-			vxlan_xmit_one(skb, dev, vni, fdst, did_rsc);
++			vxlan_xmit_one(skb, dev, vni, fdst, did_rsc, bum);
+ 		else
+ 			kfree_skb(skb);
+ 	}
+@@ -3365,6 +3376,7 @@ static const struct nla_policy vxlan_policy[IFLA_VXLAN_MAX + 1] = {
+ 	[IFLA_VXLAN_REMCSUM_NOPARTIAL]	= { .type = NLA_FLAG },
+ 	[IFLA_VXLAN_TTL_INHERIT]	= { .type = NLA_FLAG },
+ 	[IFLA_VXLAN_DF]		= { .type = NLA_U8 },
++	[IFLA_VXLAN_GPE_BUM]	= { .type = NLA_U8 },
+ };
+
+ static int vxlan_validate(struct nlattr *tb[], struct nlattr *data[],
+@@ -4220,6 +4232,9 @@ static int vxlan_nl2conf(struct nlattr *tb[], struct nlattr *data[],
+ 	if (data[IFLA_VXLAN_DF])
+ 		conf->df = nla_get_u8(data[IFLA_VXLAN_DF]);
+
++	if (data[IFLA_VXLAN_GPE_BUM])
++		conf->gpe_bum = nla_get_u8(data[IFLA_VXLAN_GPE_BUM]);
++
+ 	return 0;
+ }
+
+@@ -4346,6 +4361,7 @@ static size_t vxlan_get_size(const struct net_device *dev)
+ 		nla_total_size(sizeof(__u8)) + /* IFLA_VXLAN_UDP_ZERO_CSUM6_RX */
+ 		nla_total_size(sizeof(__u8)) + /* IFLA_VXLAN_REMCSUM_TX */
+ 		nla_total_size(sizeof(__u8)) + /* IFLA_VXLAN_REMCSUM_RX */
++		nla_total_size(sizeof(__u8)) + /* IFLA_VXLAN_GPE_BUM */
+ 		0;
+ }
+
+@@ -4397,6 +4413,7 @@ static int vxlan_fill_info(struct sk_buff *skb, const struct net_device *dev)
+ 		       !!(vxlan->cfg.flags & VXLAN_F_TTL_INHERIT)) ||
+ 	    nla_put_u8(skb, IFLA_VXLAN_TOS, vxlan->cfg.tos) ||
+ 	    nla_put_u8(skb, IFLA_VXLAN_DF, vxlan->cfg.df) ||
++	    nla_put_u8(skb, IFLA_VXLAN_GPE_BUM, vxlan->cfg.gpe_bum) ||
+ 	    nla_put_be32(skb, IFLA_VXLAN_LABEL, vxlan->cfg.label) ||
+ 	    nla_put_u8(skb, IFLA_VXLAN_LEARNING,
+ 		       !!(vxlan->cfg.flags & VXLAN_F_LEARN)) ||
+diff --git a/include/net/vxlan.h b/include/net/vxlan.h
+index 08537aa14..99113fdea 100644
+--- a/include/net/vxlan.h
++++ b/include/net/vxlan.h
+@@ -27,6 +27,7 @@ struct vxlanhdr {
+
+ /* VXLAN header flags. */
+ #define VXLAN_HF_VNI	cpu_to_be32(BIT(27))
++#define VXLAN_BUM_BIT	cpu_to_be32(BIT(25))
+
+ #define VXLAN_N_VID     (1u << 24)
+ #define VXLAN_VID_MASK  (VXLAN_N_VID - 1)
+@@ -224,6 +225,7 @@ struct vxlan_config {
+ 	unsigned int		addrmax;
+ 	bool			no_share;
+ 	enum ifla_vxlan_df	df;
++	enum ifla_vxlan_gpe_bum gpe_bum;
+ };
+
+ struct vxlan_dev_node {
+diff --git a/include/uapi/linux/if_link.h b/include/uapi/linux/if_link.h
+index c4b23f06f..88acb2ee5 100644
+--- a/include/uapi/linux/if_link.h
++++ b/include/uapi/linux/if_link.h
+@@ -728,6 +728,7 @@ enum {
+ 	IFLA_VXLAN_GPE,
+ 	IFLA_VXLAN_TTL_INHERIT,
+ 	IFLA_VXLAN_DF,
++	IFLA_VXLAN_GPE_BUM,
+ 	__IFLA_VXLAN_MAX
+ };
+ #define IFLA_VXLAN_MAX	(__IFLA_VXLAN_MAX - 1)
+@@ -745,6 +746,13 @@ enum ifla_vxlan_df {
+ 	VXLAN_DF_MAX = __VXLAN_DF_END - 1,
+ };
+
++enum ifla_vxlan_gpe_bum {
++	VXLAN_GPE_BUM_UNSET = 0,
++	VXLAN_GPE_BUM_SET,
++	__VXLAN_GPE_BUM_END,
++	VXLAN_GPE_BUM_MAX = __VXLAN_GPE_BUM_END - 1,
++};
++
+ /* GENEVE section */
+ enum {
+ 	IFLA_GENEVE_UNSPEC,
+--
+2.17.1
+

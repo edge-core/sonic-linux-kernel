@@ -1,5 +1,5 @@
 # This series applies on GIT commit 18c5597832fcf6988111b05a9a1607ae148723c
-# Note: Markers should start with "###->". 
+# Note: Markers should start with "###->".
 #       Header should end with .*-start eg: any_description-start
 #       Footer must end with .*-end eg: any_description-end
 #       Markers should not be nested
@@ -293,6 +293,7 @@ armhf_secondary_boot_online.patch
 # Edgecore patches for 5.10 kernel
 0001-Add-platform-specific-reboot-op-hook-function.patch
 0002-patch-to-revert-the-platform-specific-reboot-commit.patch
+0007-Add-workaround-to-support-VXLAN-GPE-extension-BUM.patch
 
 #
 #
