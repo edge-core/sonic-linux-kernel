@@ -6,6 +6,8 @@ CONFIG_CGROUP_NET_CLASSID
 CONFIG_NET_CLS_CGROUP
 CONFIG_NETFILTER_XT_MATCH_CGROUP
 CONFIG_CGROUP_NET_PRIO
+# Disable AEAD crypto API to mitigate CVE-2026-31431 (copy.fail) in algif_aead
+CONFIG_CRYPTO_USER_API_AEAD
 ###-> mellanox_common-start
 ###-> mellanox_common-end
 
