@@ -296,12 +296,17 @@ armhf_secondary_boot_online.patch
 0002-patch-to-revert-the-platform-specific-reboot-commit.patch
 0007-Add-workaround-to-support-VXLAN-GPE-extension-BUM.patch
 
+# Security: CVE-2026-43284 (Dirty Frag ESP variant)
+CVE-2026-43284-esp-avoid-inplace-decrypt-shared-frags.patch
+CVE-2026-43500-rxrpc-unshare-shared-frags.patch
+
 #
 #
 ############################################################
 #
 # Internal patches will be added below (placeholder)
 # Do not add any public patch below this marker
+
 #
 ############################################################
 increase-interface-num-per-bridge-port.patch
