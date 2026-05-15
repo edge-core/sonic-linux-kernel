@@ -299,6 +299,7 @@ armhf_secondary_boot_online.patch
 # Security: CVE-2026-43284 (Dirty Frag ESP variant)
 CVE-2026-43284-esp-avoid-inplace-decrypt-shared-frags.patch
 CVE-2026-43500-rxrpc-unshare-shared-frags.patch
+CVE-2026-46300-skbuff-propagate-shared-frag.patch
 
 #
 #
